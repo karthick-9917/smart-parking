@@ -1,0 +1,278 @@
+// SmartPark — Prisma Schema
+// PostgreSQL 15+
+// Run: npx prisma migrate dev --name init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  EMPLOYEE
+  ADMIN
+}
+
+enum SlotStatus {
+  AVAILABLE
+  OCCUPIED
+  RESERVED    // held while owner completes OTP; released on expiry
+  MAINTENANCE
+}
+
+enum BookingStatus {
+  PENDING_OTP // created; awaiting OTP confirmation
+  CONFIRMED   // OTP verified; slot is OCCUPIED
+  CANCELLED   // cancelled by owner or admin before arrival
+  EXPIRED     // OTP window elapsed without confirmation
+  NO_SHOW     // confirmed but vehicle never arrived (admin-set)
+}
+
+enum OtpPurpose {
+  LOGIN
+  BOOKING_CONFIRM
+}
+
+enum NotificationType {
+  BOOKING_CREATED
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  BOOKING_EXPIRED
+  OTP_SENT
+  OTP_EXPIRY_WARNING
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  PUSH
+}
+
+enum AuditAction {
+  BOOKING_CREATED
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  BOOKING_EXPIRED
+  SLOT_CREATED
+  SLOT_UPDATED
+  SLOT_BLOCKED
+  FLOOR_CREATED
+  FLOOR_UPDATED
+  VEHICLE_ADDED
+  VEHICLE_REMOVED
+  USER_LOGIN
+  USER_LOGOUT
+  ADMIN_ACTION
+}
+
+// ─── users ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  phone        String?  @unique
+  role         Role     @default(EMPLOYEE)
+  employeeId   String   @unique
+  department   String?
+  passwordHash String?
+  isActive     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  vehicles         Vehicle[]
+  bookings         Booking[]
+  otpVerifications OtpVerification[]
+  notifications    Notification[]
+  auditLogs        AuditLog[]
+
+  @@index([email])
+  @@index([employeeId])
+  @@index([role])
+  @@map("users")
+}
+
+// ─── vehicles ────────────────────────────────────────────────────────────────
+
+model Vehicle {
+  id           String   @id @default(cuid())
+  userId       String
+  licensePlate String   @unique
+  make         String?
+  model        String?
+  color        String?
+  isPrimary    Boolean  @default(false) // one primary per user; enforced in app layer
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id])
+  bookings Booking[]
+
+  @@index([userId])
+  @@index([licensePlate])
+  @@map("vehicles")
+}
+
+// ─── parking_floors ──────────────────────────────────────────────────────────
+
+model ParkingFloor {
+  id          String   @id @default(cuid())
+  name        String                    // e.g. "Ground Floor", "Level 1"
+  level       Int      @unique          // 0 = ground; drives display order
+  description String?
+  isActive    Boolean  @default(true)
+  totalSlots  Int      @default(0)      // denormalised; kept in sync by createSlot action
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  slots ParkingSlot[]
+
+  @@index([level])
+  @@index([isActive])
+  @@map("parking_floors")
+}
+
+// ─── parking_slots ───────────────────────────────────────────────────────────
+
+model ParkingSlot {
+  id           String     @id @default(cuid())
+  floorId      String
+  label        String                   // e.g. "A-01", "B-12"
+  zone         String                   // e.g. "A", "B", "VIP", "EV"
+  row          Int                      // grid row for visual map rendering
+  column       Int                      // grid column for visual map rendering
+  status       SlotStatus @default(AVAILABLE)
+  isEVCharging Boolean    @default(false)
+  isHandicap   Boolean    @default(false)
+  notes        String?                  // maintenance or admin notes
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  floor    ParkingFloor @relation(fields: [floorId], references: [id])
+  bookings Booking[]
+
+  @@unique([floorId, label])            // no duplicate labels within a floor
+  @@unique([floorId, row, column])      // no two slots share a grid cell
+  @@index([floorId])
+  @@index([status])
+  @@index([zone])
+  @@index([floorId, status])            // hot path: availability query per floor
+  @@map("parking_slots")
+}
+
+// ─── bookings ────────────────────────────────────────────────────────────────
+
+model Booking {
+  id                 String        @id @default(cuid())
+  userId             String
+  slotId             String
+  vehicleId          String?                 // FK to vehicles; optional
+  date               DateTime      @db.Date  // booking date (no time component)
+  startTime          DateTime                // full timestamp with time
+  endTime            DateTime
+  status             BookingStatus @default(PENDING_OTP)
+  vehicleNumber      String?                 // free-text fallback when vehicleId is null
+  confirmedAt        DateTime?
+  cancelledAt        DateTime?
+  cancelledBy        String?                 // userId of canceller (self or admin)
+  cancellationReason String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  user            User             @relation(fields: [userId], references: [id])
+  slot            ParkingSlot      @relation(fields: [slotId], references: [id])
+  vehicle         Vehicle?         @relation(fields: [vehicleId], references: [id])
+  otpVerification OtpVerification? @relation("BookingOtp")
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+
+  // DB-enforced: one booking per slot per time window (prevents race-condition double-booking)
+  @@unique([slotId, date, startTime, endTime])
+  @@index([userId])
+  @@index([slotId])
+  @@index([date])
+  @@index([status])
+  @@index([userId, date])               // employee booking history query
+  @@index([slotId, date, status])       // conflict check before booking
+  @@map("bookings")
+}
+
+// ─── otp_verifications ───────────────────────────────────────────────────────
+
+model OtpVerification {
+  id          String     @id @default(cuid())
+  userId      String
+  bookingId   String?    @unique          // non-null only for BOOKING_CONFIRM; @unique = one OTP per booking
+  purpose     OtpPurpose
+  otpHash     String                      // bcrypt hash — plaintext is never stored
+  attempts    Int        @default(0)
+  maxAttempts Int        @default(3)
+  expiresAt   DateTime                    // createdAt + 5 minutes
+  verifiedAt  DateTime?                   // set on successful verification
+  isLocked    Boolean    @default(false)  // true after maxAttempts exceeded
+  deliveredTo String                      // email or phone number actually used
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id])
+  booking Booking? @relation("BookingOtp", fields: [bookingId], references: [id])
+
+  @@index([userId, purpose])
+  @@index([expiresAt])                    // cron: find expired unverified records
+  @@index([bookingId])
+  @@map("otp_verifications")
+}
+
+// ─── notifications ───────────────────────────────────────────────────────────
+
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String
+  bookingId String?
+  type      NotificationType
+  channel   NotificationChannel @default(EMAIL)
+  title     String
+  message   String
+  isRead    Boolean             @default(false)
+  sentAt    DateTime?           // null = queued but not yet delivered
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id])
+  booking Booking? @relation(fields: [bookingId], references: [id])
+
+  @@index([userId])
+  @@index([bookingId])
+  @@index([userId, isRead])              // unread-count query
+  @@index([type])
+  @@index([sentAt])                      // outbox: find unsent notifications
+  @@map("notifications")
+}
+
+// ─── audit_logs ──────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id        String      @id @default(cuid())
+  action    AuditAction
+  userId    String?                         // actor; null for system/cron actions
+  bookingId String?
+  slotId    String?
+  metadata  Json?                           // action-specific extra context (flexible)
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime    @default(now())     // no updatedAt — rows are immutable
+
+  user    User?    @relation(fields: [userId], references: [id])
+  booking Booking? @relation(fields: [bookingId], references: [id])
+
+  @@index([userId])
+  @@index([bookingId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
