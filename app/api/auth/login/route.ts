@@ -81,10 +81,20 @@ export async function POST(
     },
   })
 
-  return NextResponse.json({
+  const response = NextResponse.json({
     data: {
       user: { ...userWithoutHash, createdAt: userWithoutHash.createdAt.toISOString() },
       token,
     },
   })
+
+  response.cookies.set('auth-token', token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 60 * 60 * 24 * 7,
+    path: '/',
+  })
+
+  return response
 }
