@@ -57,7 +57,9 @@ export async function GET(
     },
   })
 
-  const allSlotIds = floors.flatMap(f => f.slots.map(s => s.id))
+  type FloorRow = { id: string; name: string; level: number; description: string | null; totalSlots: number; slots: { id: string }[] }
+  const floors_ = floors as FloorRow[]
+  const allSlotIds = floors_.flatMap(f => f.slots.map(s => s.id))
 
   const availabilityMap = await getSlotAvailability(
     allSlotIds,
@@ -66,7 +68,7 @@ export async function GET(
     toUtcDateTime(date, endTime)
   )
 
-  const data: FloorSummary[] = floors.map(f => ({
+  const data: FloorSummary[] = floors_.map(f => ({
     id: f.id,
     name: f.name,
     level: f.level,

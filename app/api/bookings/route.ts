@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { Prisma } from '@prisma/client'
+import { Prisma } from '.prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { broadcastSlotUpdate } from '@/lib/realtime'
@@ -41,10 +41,30 @@ export async function GET(
   const { status, date, page, limit } = parsed.data
   const skip = (page - 1) * limit
 
-  const where: Prisma.BookingWhereInput = {
+  const where = {
     userId: user.sub,
     ...(status && { status }),
     ...(date && { date: toUtcDate(date) }),
+  }
+
+  type BookingRow = {
+    id: string
+    date: Date
+    startTime: Date
+    endTime: Date
+    status: string
+    vehicleNumber: string | null
+    confirmedAt: Date | null
+    cancelledAt: Date | null
+    createdAt: Date
+    slot: {
+      id: string
+      label: string
+      zone: string
+      isEVCharging: boolean
+      isHandicap: boolean
+      floor: { id: string; name: string; level: number }
+    }
   }
 
   const [bookings, total] = await prisma.$transaction([
@@ -80,7 +100,7 @@ export async function GET(
 
   return NextResponse.json({
     data: {
-      bookings: bookings.map(b => ({
+      bookings: (bookings as BookingRow[]).map(b => ({
         ...b,
         status: b.status as BookingItem['status'],
         date: b.date.toISOString().slice(0, 10),
@@ -157,7 +177,7 @@ export async function POST(
   const ua = request.headers.get('user-agent') ?? undefined
 
   try {
-    const { bookingId, slot } = await prisma.$transaction(async tx => {
+    const { bookingId, slot } = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // ── 1. Slot guard ───────────────────────────────────────────────────────
       const slot = await tx.parkingSlot.findUnique({
         where: { id: slotId },
@@ -284,7 +304,7 @@ export async function POST(
       }
     }
     // DB unique constraint race — last-microsecond concurrent booking for the exact same window
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+    if (err instanceof Error && (err as unknown as { code?: string }).code === 'P2002') {
       return NextResponse.json(
         { error: { code: 'SLOT_CONFLICT', message: 'Slot was just taken — please choose another' } },
         { status: 409 }

@@ -65,7 +65,12 @@ export async function GET(
     )
   }
 
-  const slotIds = floor.slots.map(s => s.id)
+  type SlotRow = {
+    id: string; label: string; zone: string; row: number; column: number
+    status: string; isEVCharging: boolean; isHandicap: boolean; notes: string | null
+  }
+  const slots_ = floor.slots as SlotRow[]
+  const slotIds = slots_.map(s => s.id)
 
   const availabilityMap = await getSlotAvailability(
     slotIds,
@@ -74,7 +79,7 @@ export async function GET(
     toUtcDateTime(date, endTime)
   )
 
-  const slots: SlotWithAvailability[] = floor.slots.map(slot => {
+  const slots: SlotWithAvailability[] = slots_.map(slot => {
     const avail = availabilityMap.get(slot.id)!
     return {
       id: slot.id,

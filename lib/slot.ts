@@ -1,5 +1,6 @@
 import { prisma } from './prisma'
-import type { BookingStatus } from '@prisma/client'
+
+type BookingStatus = 'PENDING_OTP' | 'CONFIRMED' | 'CANCELLED' | 'EXPIRED' | 'NO_SHOW'
 
 export type SlotAvailabilityEntry = {
   isAvailable: boolean
@@ -35,7 +36,7 @@ export async function getSlotAvailability(
     select: { slotId: true, id: true, status: true },
   })
 
-  for (const b of bookings) {
+  for (const b of bookings as { slotId: string; id: string; status: BookingStatus }[]) {
     map.set(b.slotId, {
       isAvailable: false,
       bookingId: b.id,
