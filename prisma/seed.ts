@@ -1,13 +1,14 @@
-import {
-  PrismaClient,
-  Role,
-  SlotStatus,
-  BookingStatus,
-  OtpPurpose,
-  NotificationType,
-  NotificationChannel,
-  AuditAction,
-} from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
+
+const Role               = { ADMIN: "ADMIN",               EMPLOYEE: "EMPLOYEE"                                                                                                    } as const;
+const SlotStatus         = { AVAILABLE: "AVAILABLE",        OCCUPIED: "OCCUPIED",       RESERVED: "RESERVED",      MAINTENANCE: "MAINTENANCE"                                       } as const;
+const BookingStatus      = { PENDING_OTP: "PENDING_OTP",    CONFIRMED: "CONFIRMED",     CANCELLED: "CANCELLED",    EXPIRED: "EXPIRED",           NO_SHOW: "NO_SHOW"                  } as const;
+const OtpPurpose         = { BOOKING_CONFIRM: "BOOKING_CONFIRM"                                                                                                                      } as const;
+const NotificationType   = { OTP_SENT: "OTP_SENT",          BOOKING_CONFIRMED: "BOOKING_CONFIRMED", BOOKING_CANCELLED: "BOOKING_CANCELLED", OTP_EXPIRY_WARNING: "OTP_EXPIRY_WARNING", BOOKING_EXPIRED: "BOOKING_EXPIRED" } as const;
+const NotificationChannel= { EMAIL: "EMAIL"                                                                                                                                          } as const;
+const AuditAction        = { BOOKING_CREATED: "BOOKING_CREATED", BOOKING_CONFIRMED: "BOOKING_CONFIRMED", BOOKING_CANCELLED: "BOOKING_CANCELLED", BOOKING_EXPIRED: "BOOKING_EXPIRED", FLOOR_CREATED: "FLOOR_CREATED", SLOT_BLOCKED: "SLOT_BLOCKED" } as const;
+
+type BookingStatus = typeof BookingStatus[keyof typeof BookingStatus];
 import bcrypt from "bcrypt";
 
 const prisma = new PrismaClient();
@@ -204,7 +205,11 @@ async function main() {
   // Each slot appears at most once per date+startTime+endTime (unique constraint).
   // Working hours: 09:00–18:00; half-day slots: 09:00–13:00 and 13:00–18:00.
 
-  type BookingInput = Parameters<typeof prisma.booking.create>[0]["data"];
+  type BookingInput = {
+    userId: string; slotId: string; vehicleId?: string | null; vehicleNumber?: string | null
+    date: Date; startTime: Date; endTime: Date; status: BookingStatus
+    confirmedAt?: Date; cancelledAt?: Date; cancelledBy?: string
+  };
 
   function book(
     user: { id: string }, slot: { id: string }, vehicle: { id: string } | null,
@@ -321,7 +326,7 @@ async function main() {
   // Verified OTPs (booking confirmed)
   const userEmailCache = new Map<string, string>();
   const allUsers = await prisma.user.findMany({ select: { id: true, email: true } });
-  allUsers.forEach((u) => userEmailCache.set(u.id, u.email));
+  (allUsers as { id: string; email: string }[]).forEach((u) => userEmailCache.set(u.id, u.email));
 
   await Promise.all(
     confirmedBookings.map((b) =>

@@ -14,7 +14,8 @@ async function getFloors(): Promise<FloorSummary[]> {
     include: { _count: { select: { slots: { where: { status: 'AVAILABLE' } } } } },
   })
 
-  return floors.map((f) => ({
+  type FloorRow = (typeof floors)[number]
+  return floors.map((f: FloorRow) => ({
     id: f.id,
     name: f.name,
     level: f.level,

@@ -1,6 +1,6 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
-import { Prisma } from '@prisma/client'
+import { Prisma } from '.prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
 import { broadcastSlotUpdate } from '@/lib/realtime'
@@ -63,7 +63,7 @@ export async function POST(
   const endTimeObj = toUtcDateTime(date, endTime)
 
   try {
-    const { booking, slot } = await prisma.$transaction(async tx => {
+    const { booking, slot } = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // 1. Verify slot exists and is physically AVAILABLE
       const slot = await tx.parkingSlot.findUnique({
         where: { id: slotId },
@@ -145,7 +145,7 @@ export async function POST(
       }
     }
     // Unique constraint race: another request won the same exact time window
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+    if (err instanceof Error && (err as unknown as { code?: string }).code === 'P2002') {
       return NextResponse.json(
         { error: { code: 'SLOT_CONFLICT', message: 'Slot was just taken — please choose another' } },
         { status: 409 }

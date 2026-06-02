@@ -3,7 +3,8 @@ import bcrypt from 'bcrypt'
 import { prisma } from '@/lib/prisma'
 import { signToken } from '@/lib/auth'
 import { hashOtp, otpExpiresAt, OTP_MAX_ATTEMPTS } from '@/lib/otp'
-import type { Role, SlotStatus } from '@prisma/client'
+type Role = 'ADMIN' | 'EMPLOYEE'
+type SlotStatus = 'AVAILABLE' | 'OCCUPIED' | 'RESERVED' | 'MAINTENANCE'
 
 // ─── Request factory ──────────────────────────────────────────────────────────
 
