@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState } from 'react'
 import { SlotCard } from './SlotCard'
 import { BookingModal } from './BookingModal'
 import { OTPModal } from './OTPModal'
-import { floorsApi } from '@/lib/api'
 import { Spinner } from '@/components/ui/Spinner'
-import { todayISO } from '@/lib/utils'
+import { useSlotUpdates } from '@/hooks/useSlotUpdates'
+import { todayISO, cn } from '@/lib/utils'
 import type { FloorSummary, SlotWithAvailability, CreateBookingResponse } from '@/types'
 
 type Props = {
@@ -19,32 +19,20 @@ export const ParkingGrid = ({ floors }: Props) => {
   const [startTime, setStartTime] = useState('09:00')
   const [endTime, setEndTime] = useState('18:00')
 
-  const [slots, setSlots] = useState<SlotWithAvailability[]>([])
-  const [loadingSlots, setLoadingSlots] = useState(false)
-  const [slotsError, setSlotsError] = useState('')
-
   const [selectedSlot, setSelectedSlot] = useState<SlotWithAvailability | null>(null)
   const [pendingBooking, setPendingBooking] = useState<CreateBookingResponse | null>(null)
 
   const selectedFloor = floors.find((f) => f.id === selectedFloorId)
 
-  const fetchSlots = useCallback(async () => {
-    if (!selectedFloorId) return
-    setLoadingSlots(true)
-    setSlotsError('')
-    try {
-      const data = await floorsApi.slots(selectedFloorId, { date, startTime, endTime })
-      setSlots(data.slots)
-    } catch {
-      setSlotsError('Failed to load slots. Please refresh.')
-    } finally {
-      setLoadingSlots(false)
-    }
-  }, [selectedFloorId, date, startTime, endTime])
-
-  useEffect(() => {
-    void fetchSlots()
-  }, [fetchSlots])
+  const {
+    slots,
+    loading: loadingSlots,
+    error: slotsError,
+    isLive,
+    lastUpdated,
+    flashingSlots,
+    refresh,
+  } = useSlotUpdates(selectedFloorId, date, startTime, endTime)
 
   function handleBooked(result: CreateBookingResponse) {
     setSelectedSlot(null)
@@ -53,7 +41,7 @@ export const ParkingGrid = ({ floors }: Props) => {
 
   function handleConfirmed() {
     setPendingBooking(null)
-    void fetchSlots()
+    void refresh()
   }
 
   const rows = slots.reduce<Record<number, SlotWithAvailability[]>>((acc, slot) => {
@@ -119,6 +107,23 @@ export const ParkingGrid = ({ floors }: Props) => {
         </div>
       </div>
 
+      {/* Live badge */}
+      <div className="flex items-center gap-2">
+        <div className={cn(
+          'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
+          isLive
+            ? 'border-green-200 bg-green-50 text-green-700'
+            : 'border-amber-200 bg-amber-50 text-amber-700'
+        )}>
+          <span className={cn('h-1.5 w-1.5 rounded-full', isLive ? 'bg-green-500 animate-pulse' : 'bg-amber-400')} />
+          {isLive
+            ? lastUpdated
+              ? `Live · ${lastUpdated.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`
+              : 'Live'
+            : 'Reconnecting…'}
+        </div>
+      </div>
+
       {/* Legend */}
       <div className="flex flex-wrap gap-4 text-xs">
         {[
@@ -167,6 +172,7 @@ export const ParkingGrid = ({ floors }: Props) => {
                         key={slot.id}
                         slot={slot}
                         selected={selectedSlot?.id === slot.id}
+                        flashing={flashingSlots.has(slot.id)}
                         onClick={slot.isAvailable ? () => setSelectedSlot(slot) : undefined}
                       />
                     ))}
@@ -193,7 +199,7 @@ export const ParkingGrid = ({ floors }: Props) => {
           open={Boolean(pendingBooking)}
           onClose={() => {
             setPendingBooking(null)
-            void fetchSlots()
+            void refresh()
           }}
           onConfirmed={handleConfirmed}
         />

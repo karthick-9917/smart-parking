@@ -78,6 +78,16 @@ export type SlotUpdateEvent = {
   isAvailable: boolean
 }
 
+export type BookingUpdateEvent = {
+  bookingId: string
+  userId: string
+  status: BookingStatus
+  slotLabel: string
+  floorName: string
+  confirmedAt: string | null
+  cancelledAt: string | null
+}
+
 // ─── Bookings ─────────────────────────────────────────────────────────────────
 
 export type BookingItem = {

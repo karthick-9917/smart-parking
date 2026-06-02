@@ -40,6 +40,15 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# MCP export outputs — keep directory structure, ignore generated files
+/exports/analytics/*
+/exports/audit/*
+/exports/bookings/*
+!exports/**/.gitkeep
+
+# Claude local settings (personal overrides, not team config)
+.claude/settings.local.json
+
 /app/generated/prisma
 
 # Compiled class file

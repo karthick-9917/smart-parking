@@ -1,5 +1,5 @@
 import Pusher from 'pusher'
-import type { SlotUpdateEvent } from '@/types'
+import type { SlotUpdateEvent, BookingUpdateEvent } from '@/types'
 
 let _pusher: Pusher | null = null
 
@@ -25,5 +25,16 @@ export async function broadcastSlotUpdate(event: SlotUpdateEvent): Promise<void>
     await pusher.trigger(`parking-floor-${event.floorId}`, 'slot-updated', event)
   } catch (err) {
     console.error('[realtime] Pusher trigger failed', err)
+  }
+}
+
+// Broadcast on channel `booking-user-{userId}` for booking status notifications.
+export async function broadcastBookingUpdate(event: BookingUpdateEvent): Promise<void> {
+  const pusher = getPusher()
+  if (!pusher) return
+  try {
+    await pusher.trigger(`booking-user-${event.userId}`, 'booking-updated', event)
+  } catch (err) {
+    console.error('[realtime] Pusher booking trigger failed', err)
   }
 }

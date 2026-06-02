@@ -4,6 +4,7 @@ import type { SlotWithAvailability, SlotStatus } from '@/types'
 type Props = {
   slot: SlotWithAvailability
   selected?: boolean
+  flashing?: boolean
   onClick?: () => void
 }
 
@@ -21,7 +22,7 @@ const statusLabel: Record<SlotStatus, string> = {
   MAINTENANCE: 'Maintenance',
 }
 
-export const SlotCard = ({ slot, selected, onClick }: Props) => {
+export const SlotCard = ({ slot, selected, flashing, onClick }: Props) => {
   const isClickable = slot.isAvailable && onClick
 
   return (
@@ -35,6 +36,7 @@ export const SlotCard = ({ slot, selected, onClick }: Props) => {
         'min-h-[64px] min-w-[60px] text-xs font-medium',
         statusStyles[slot.status],
         selected && 'ring-2 ring-blue-500 ring-offset-2',
+        flashing && 'animate-flash',
         slot.isEVCharging && 'ring-1 ring-emerald-400',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
       )}
