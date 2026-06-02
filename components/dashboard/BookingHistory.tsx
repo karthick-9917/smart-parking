@@ -5,8 +5,10 @@ import { bookingsApi, ApiError } from '@/lib/api'
 import { Badge } from '@/components/ui/Badge'
 import { Button } from '@/components/ui/Button'
 import { Spinner } from '@/components/ui/Spinner'
-import { formatDate, formatTime } from '@/lib/utils'
-import type { BookingItem } from '@/types'
+import { formatDate, formatTime, cn } from '@/lib/utils'
+import { useAuth } from '@/lib/context/auth'
+import { useBookingUpdates } from '@/hooks/useBookingUpdates'
+import type { BookingItem, BookingUpdateEvent } from '@/types'
 
 type StatusFilter = 'ALL' | 'PENDING_OTP' | 'CONFIRMED' | 'CANCELLED' | 'EXPIRED'
 
@@ -26,6 +28,7 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 export const BookingHistory = () => {
+  const { user } = useAuth()
   const [bookings, setBookings] = useState<BookingItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -58,6 +61,23 @@ export const BookingHistory = () => {
     void fetchBookings()
   }, [fetchBookings])
 
+  const handleBookingUpdate = useCallback((event: BookingUpdateEvent) => {
+    setBookings((prev) =>
+      prev.map((b) =>
+        b.id === event.bookingId
+          ? {
+              ...b,
+              status: event.status,
+              confirmedAt: event.confirmedAt,
+              cancelledAt: event.cancelledAt,
+            }
+          : b
+      )
+    )
+  }, [])
+
+  const { isLive } = useBookingUpdates(user?.id ?? null, handleBookingUpdate)
+
   async function handleCancel(bookingId: string) {
     setCancelling(bookingId)
     try {
@@ -74,8 +94,17 @@ export const BookingHistory = () => {
 
   return (
     <div className="space-y-4">
-      {/* Filter */}
+      {/* Filter + live badge */}
       <div className="flex flex-wrap items-center gap-2">
+        <div className={cn(
+          'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium',
+          isLive
+            ? 'border-green-200 bg-green-50 text-green-700'
+            : 'border-amber-200 bg-amber-50 text-amber-700'
+        )}>
+          <span className={cn('h-1.5 w-1.5 rounded-full', isLive ? 'bg-green-500 animate-pulse' : 'bg-amber-400')} />
+          {isLive ? 'Live' : 'Connecting…'}
+        </div>
         {(['ALL', 'PENDING_OTP', 'CONFIRMED', 'CANCELLED'] as StatusFilter[]).map((s) => (
           <button
             key={s}

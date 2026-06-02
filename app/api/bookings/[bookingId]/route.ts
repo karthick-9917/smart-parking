@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { broadcastSlotUpdate } from '@/lib/realtime'
+import { broadcastSlotUpdate, broadcastBookingUpdate } from '@/lib/realtime'
 import type { ApiError, ApiSuccess, BookingDetail } from '@/types'
 
 type RouteContext = { params: Promise<{ bookingId: string }> }
@@ -126,7 +126,7 @@ export async function DELETE(
       userId: true,
       status: true,
       slotId: true,
-      slot: { select: { floorId: true, label: true } },
+      slot: { select: { floorId: true, label: true, floor: { select: { name: true } } } },
     },
   })
 
@@ -153,13 +153,14 @@ export async function DELETE(
 
   const ip = request.headers.get('x-forwarded-for') ?? request.headers.get('x-real-ip') ?? undefined
   const ua = request.headers.get('user-agent') ?? undefined
+  const cancelledAt = new Date()
 
   await prisma.$transaction([
     prisma.booking.update({
       where: { id: bookingId },
       data: {
         status: 'CANCELLED',
-        cancelledAt: new Date(),
+        cancelledAt,
         cancelledBy: user.sub,
       },
     }),
@@ -180,13 +181,24 @@ export async function DELETE(
     }),
   ])
 
-  await broadcastSlotUpdate({
-    slotId: booking.slotId,
-    floorId: booking.slot.floorId,
-    label: booking.slot.label,
-    status: 'AVAILABLE',
-    isAvailable: true,
-  })
+  await Promise.all([
+    broadcastSlotUpdate({
+      slotId: booking.slotId,
+      floorId: booking.slot.floorId,
+      label: booking.slot.label,
+      status: 'AVAILABLE',
+      isAvailable: true,
+    }),
+    broadcastBookingUpdate({
+      bookingId,
+      userId: booking.userId,
+      status: 'CANCELLED',
+      slotLabel: booking.slot.label,
+      floorName: booking.slot.floor.name,
+      confirmedAt: null,
+      cancelledAt: cancelledAt.toISOString(),
+    }),
+  ])
 
   return NextResponse.json({ data: { cancelled: true } })
 }

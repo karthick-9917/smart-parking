@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { getAuthUser } from '@/lib/auth'
-import { broadcastSlotUpdate } from '@/lib/realtime'
+import { broadcastSlotUpdate, broadcastBookingUpdate } from '@/lib/realtime'
 import { verifyOtpHash } from '@/lib/otp'
 import type { ApiError, ApiSuccess, BookingDetail } from '@/types'
 
@@ -58,7 +58,7 @@ export async function POST(
       userId: true,
       slotId: true,
       status: true,
-      slot: { select: { floorId: true, label: true } },
+      slot: { select: { floorId: true, label: true, floor: { select: { name: true } } } },
       otpVerification: {
         select: {
           id: true,
@@ -180,13 +180,24 @@ export async function POST(
     }),
   ])
 
-  await broadcastSlotUpdate({
-    slotId: booking.slotId,
-    floorId: booking.slot.floorId,
-    label: booking.slot.label,
-    status: 'OCCUPIED',
-    isAvailable: false,
-  })
+  await Promise.all([
+    broadcastSlotUpdate({
+      slotId: booking.slotId,
+      floorId: booking.slot.floorId,
+      label: booking.slot.label,
+      status: 'OCCUPIED',
+      isAvailable: false,
+    }),
+    broadcastBookingUpdate({
+      bookingId,
+      userId: user.sub,
+      status: 'CONFIRMED',
+      slotLabel: booking.slot.label,
+      floorName: booking.slot.floor.name,
+      confirmedAt: now.toISOString(),
+      cancelledAt: null,
+    }),
+  ])
 
   return NextResponse.json({
     data: {
