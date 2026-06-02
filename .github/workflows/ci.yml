@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel any in-progress run on the same ref so fast-follow pushes don't pile up.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ── 1. Lint ──────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+  # ── 2. Type-check ────────────────────────────────────────────────────────────
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Prisma generate must run before tsc so @prisma/client types exist.
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: tsc --noEmit
+        run: npm run typecheck
+
+  # ── 3. Tests ─────────────────────────────────────────────────────────────────
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: smartpark_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: pass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:pass@localhost:5432/smartpark_test
+      JWT_SECRET: ci-test-jwt-secret-key-minimum-32c!
+      JWT_EXPIRES_IN: 1h
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # globalSetup.ts runs `prisma migrate deploy`; client must be generated first.
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Run tests
+        run: npm run test
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: ignore
+
+  # ── 4. Build ─────────────────────────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    # Only build if static analysis passes — avoids wasting build minutes.
+    needs: [lint, type-check]
+
+    env:
+      # Next.js pages use cookies() making them dynamic; no DB connection at
+      # build time. Placeholder values satisfy the env-var check in lib/prisma.ts.
+      DATABASE_URL: postgresql://postgres:pass@localhost:5432/smartpark_build
+      JWT_SECRET: build-time-placeholder-jwt-secret-32c
+      NEXT_PUBLIC_PUSHER_KEY: ${{ secrets.NEXT_PUBLIC_PUSHER_KEY }}
+      NEXT_PUBLIC_PUSHER_CLUSTER: ${{ secrets.NEXT_PUBLIC_PUSHER_CLUSTER }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: next build
+        run: npm run build
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextjs-build
+          path: .next/
+          retention-days: 3
+
+  # ── 5. npm audit ─────────────────────────────────────────────────────────────
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Fail on high or critical severity vulnerabilities only.
+      # Use --audit-level=moderate to tighten, or =critical to loosen.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
